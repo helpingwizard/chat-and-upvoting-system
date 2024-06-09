@@ -13,32 +13,43 @@ class UserManager {
             });
         }
         (_a = this.rooms.get(roomId)) === null || _a === void 0 ? void 0 : _a.users.push({
-            name,
             id: userId,
+            name,
             conn: socket
         });
-    }
-    getUser(roomId, userId) {
-        var _a;
-        const user = (_a = this.rooms.get(roomId)) === null || _a === void 0 ? void 0 : _a.users.find(({ id }) => id === userId);
-        return user !== null && user !== void 0 ? user : null;
+        socket.on('close', (reasonCode, description) => {
+            this.removeUser(roomId, userId);
+        });
     }
     removeUser(roomId, userId) {
         var _a;
+        console.log("removed user");
         const users = (_a = this.rooms.get(roomId)) === null || _a === void 0 ? void 0 : _a.users;
         if (users) {
-            this.rooms.set(roomId, {
-                users: users.filter(({ id }) => id !== userId)
-            });
+            users.filter(({ id }) => id !== userId);
         }
     }
+    getUser(roomId, userId) {
+        var _a;
+        const user = (_a = this.rooms.get(roomId)) === null || _a === void 0 ? void 0 : _a.users.find((({ id }) => id === userId));
+        return user !== null && user !== void 0 ? user : null;
+    }
     broadcast(roomId, userId, message) {
-        const room = this.rooms.get(roomId);
-        if (!room) {
-            console.error("Room not found");
+        const user = this.getUser(roomId, userId);
+        if (!user) {
+            console.error("User not found");
             return;
         }
-        room.users.forEach(({ conn }) => {
+        const room = this.rooms.get(roomId);
+        if (!room) {
+            console.error("Rom rom not found");
+            return;
+        }
+        room.users.forEach(({ conn, id }) => {
+            if (id === userId) {
+                return;
+            }
+            console.log("outgoing message " + JSON.stringify(message));
             conn.sendUTF(JSON.stringify(message));
         });
     }

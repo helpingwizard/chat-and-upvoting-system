@@ -3,54 +3,69 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const outgoingMessages_1 = require("./messages/outgoingMessages");
 const websocket_1 = require("websocket");
 const http_1 = __importDefault(require("http"));
 const incomingMessages_1 = require("./messages/incomingMessages");
-const inMemoryStore_1 = require("./inMemoryStore");
 const userManager_1 = require("./userManager");
-const outgoingMessages_1 = require("./messages/outgoingMessages");
-const userManager = new userManager_1.UserManager();
-const store = new inMemoryStore_1.InMemoryStore();
-var server = http_1.default.createServer(function (request, response) {
+const inMemoryStore_1 = require("./inMemoryStore");
+const server = http_1.default.createServer(function (request, response) {
     console.log((new Date()) + ' Received request for ' + request.url);
     response.writeHead(404);
     response.end();
 });
+server;
+const userManager = new userManager_1.UserManager();
+const store = new inMemoryStore_1.InMemoryStore();
 server.listen(8080, function () {
     console.log((new Date()) + ' Server is listening on port 8080');
 });
 const wsServer = new websocket_1.server({
     httpServer: server,
-    // You should not use autoAcceptConnections for production
-    // applications, as it defeats all standard cross-origin protection
-    // facilities built into the protocol and the browser.  You should
-    // *always* verify the connection's origin and decide whether or not
-    // to accept it.
     autoAcceptConnections: false
 });
 function originIsAllowed(origin) {
-    // put logic here to detect whether the specified origin is allowed.
     return true;
 }
+wsServer.on('request', function (request) {
+    console.log("inside connect");
+    if (!originIsAllowed(request.origin)) {
+        // Make sure we only accept requests from an allowed origin
+        request.reject();
+        console.log((new Date()) + ' Connection from origin ' + request.origin + ' rejected.');
+        return;
+    }
+    var connection = request.accept('echo-protocol', request.origin);
+    console.log((new Date()) + ' Connection accepted.');
+    connection.on('message', function (message) {
+        // Todo add rate limitting logic here 
+        if (message.type === 'utf8') {
+            try {
+                messageHandler(connection, JSON.parse(message.utf8Data));
+            }
+            catch (e) {
+            }
+        }
+    });
+});
 function messageHandler(ws, message) {
-    if (message.type == incomingMessages_1.SupportesMessage.JoinRoom) {
+    if (message.type == incomingMessages_1.SupportedMessage.JoinRoom) {
         const payload = message.payload;
         userManager.addUser(payload.name, payload.userId, payload.roomId, ws);
     }
-    if (message.type == incomingMessages_1.SupportesMessage.SendMessage) {
+    if (message.type === incomingMessages_1.SupportedMessage.SendMessage) {
         const payload = message.payload;
         const user = userManager.getUser(payload.roomId, payload.userId);
         if (!user) {
-            console.log("user not found in DB");
+            console.error("User not found in the db");
             return;
         }
         let chat = store.addChat(payload.userId, user.name, payload.roomId, payload.message);
         if (!chat) {
             return;
         }
-        //add broadcast logic here
         const outgoingPayload = {
-            type: outgoingMessages_1.SupportesMessage1.AddChat,
+            type: outgoingMessages_1.SupportedMessage.AddChat,
             payload: {
                 chatId: chat.id,
                 roomId: payload.roomId,
@@ -61,16 +76,16 @@ function messageHandler(ws, message) {
         };
         userManager.broadcast(payload.roomId, payload.userId, outgoingPayload);
     }
-    if (message.type == incomingMessages_1.SupportesMessage.UpvoteMessage) {
+    if (message.type === incomingMessages_1.SupportedMessage.UpvoteMessage) {
         const payload = message.payload;
-        const chat = store.upVote(payload.userId, payload.roomId, payload.chatId);
+        const chat = store.upvote(payload.userId, payload.roomId, payload.chatId);
         console.log("inside upvote");
         if (!chat) {
             return;
         }
         console.log("inside upvote 2");
         const outgoingPayload = {
-            type: outgoingMessages_1.SupportesMessage1.UpdateChat,
+            type: outgoingMessages_1.SupportedMessage.UpdateChat,
             payload: {
                 chatId: payload.chatId,
                 roomId: payload.roomId,
@@ -81,32 +96,3 @@ function messageHandler(ws, message) {
         userManager.broadcast(payload.roomId, payload.userId, outgoingPayload);
     }
 }
-wsServer.on('request', function (request) {
-    if (!originIsAllowed(request.origin)) {
-        // Make sure we only accept requests from an allowed origin
-        request.reject();
-        console.log((new Date()) + ' Connection from origin ' + request.origin + ' rejected.');
-        return;
-    }
-    var connection = request.accept('echo-protocol', request.origin);
-    console.log((new Date()) + ' Connection accepted.');
-    connection.on('message', function (message) {
-        // to add rate limiting logic here
-        if (message.type === 'utf8') {
-            try {
-                messageHandler(connection, JSON.parse(message.utf8Data));
-            }
-            catch (error) {
-            }
-            console.log('Received Message: ' + message.utf8Data);
-            connection.sendUTF(message.utf8Data);
-        }
-        else if (message.type === 'binary') {
-            console.log('Received Binary Message of ' + message.binaryData.length + ' bytes');
-            connection.sendBytes(message.binaryData);
-        }
-    });
-    connection.on('close', function (reasonCode, description) {
-        console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
-    });
-});

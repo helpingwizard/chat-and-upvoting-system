@@ -1,90 +1,40 @@
+import { OutgoingMessage, SupportedMessage as OutgoingSupportedMessages } from "./messages/outgoingMessages";
 import {server as WebSocketServer, connection} from "websocket"
-import http from "http"
-import { IncomingMessages, SupportesMessage } from "./messages/incomingMessages";
-import { InMemoryStore } from "./inMemoryStore";
+import http from 'http';
+
+import { IncomingMessage, SupportedMessage } from "./messages/incomingMessages";
+
+
 import { UserManager } from "./userManager";
-import { OutgoingMessages, SupportesMessage1 } from "./messages/outgoingMessages";
+import { InMemoryStore } from "./inMemoryStore";
 
-const userManager = new UserManager();
-const store = new InMemoryStore();
-
-var server = http.createServer(function(request, response) {
+const server = http.createServer(function(request: any, response: any) {
     console.log((new Date()) + ' Received request for ' + request.url);
     response.writeHead(404);
     response.end();
 });
+
+server
+
+const userManager = new UserManager();
+const store = new InMemoryStore();
+
 server.listen(8080, function() {
     console.log((new Date()) + ' Server is listening on port 8080');
 });
 
-const wsServer = new WebSocketServer({
+ const wsServer = new WebSocketServer({
     httpServer: server,
-    // You should not use autoAcceptConnections for production
-    // applications, as it defeats all standard cross-origin protection
-    // facilities built into the protocol and the browser.  You should
-    // *always* verify the connection's origin and decide whether or not
-    // to accept it.
     autoAcceptConnections: false
 });
 
 function originIsAllowed(origin: string) {
-  // put logic here to detect whether the specified origin is allowed.
   return true;
 }
 
-function messageHandler(ws: connection, message: IncomingMessages) {
-    if (message.type == SupportesMessage.JoinRoom) {
-        const payload = message.payload;
-        userManager.addUser(payload.name, payload.userId, payload.roomId, ws);
-    }
-    if (message.type ==  SupportesMessage.SendMessage) {
-        const payload = message.payload;
-        const user = userManager.getUser(payload.roomId, payload.userId);
-        if (!user) {
-            console.log("user not found in DB");
-            return;  
-        }
-
-        let chat = store.addChat(payload.userId, user.name, payload.roomId, payload.message);
-        if (!chat) {
-            return;
-        }
-        //add broadcast logic here
-        const outgoingPayload: OutgoingMessages = {
-            type: SupportesMessage1.AddChat,
-            payload: {
-                chatId: chat.id,
-                roomId : payload.roomId,
-                message: payload.message,
-                name : user.name,
-                upvotes: 0   
-            }
-            
-        }
-        userManager.broadcast(payload.roomId, payload.userId, outgoingPayload)
-    }
-    if (message.type == SupportesMessage.UpvoteMessage) {
-        const payload = message.payload;
-        const chat = store.upVote(payload.userId, payload.roomId, payload.chatId );
-        console.log("inside upvote")
-        if(!chat) {
-            return;
-        }
-        console.log("inside upvote 2")
-        const outgoingPayload: OutgoingMessages= {
-            type: SupportesMessage1.UpdateChat,
-            payload: {
-                chatId: payload.chatId,
-                roomId: payload.roomId,
-                upvotes: chat.upvotes.length
-            }
-        }
-        console.log("inside upvote 3")
-        userManager.broadcast(payload.roomId, payload.userId, outgoingPayload);
-    }
-}
-
 wsServer.on('request', function(request) {
+    console.log("inside connect");
+
     if (!originIsAllowed(request.origin)) {
       // Make sure we only accept requests from an allowed origin
       request.reject();
@@ -95,22 +45,69 @@ wsServer.on('request', function(request) {
     var connection = request.accept('echo-protocol', request.origin);
     console.log((new Date()) + ' Connection accepted.');
     connection.on('message', function(message) {
-        // to add rate limiting logic here
+
+        // Todo add rate limitting logic here 
         if (message.type === 'utf8') {
             try {
-                messageHandler(connection, JSON.parse(message.utf8Data)); 
-            } catch (error: any) {
-                
+                messageHandler(connection, JSON.parse(message.utf8Data));
+            } catch(e) {
+
             }
-            console.log('Received Message: ' + message.utf8Data);
-            connection.sendUTF(message.utf8Data);
-        }
-        else if (message.type === 'binary') {
-            console.log('Received Binary Message of ' + message.binaryData.length + ' bytes');
-            connection.sendBytes(message.binaryData);
         }
     });
-    connection.on('close', function(reasonCode, description) {
-        console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
-    });
-})
+});
+
+function messageHandler(ws: connection, message: IncomingMessage) {
+    if (message.type == SupportedMessage.JoinRoom) {
+        const payload = message.payload;
+        userManager.addUser(payload.name, payload.userId, payload.roomId, ws);
+    }
+
+    if (message.type === SupportedMessage.SendMessage) {
+        const payload = message.payload;
+        const user = userManager.getUser(payload.roomId, payload.userId);
+
+        if (!user) {
+            console.error("User not found in the db");
+            return;
+        }
+        let chat = store.addChat(payload.userId, user.name, payload.roomId, payload.message);
+        if (!chat) {
+            return;
+        }
+
+        const outgoingPayload: OutgoingMessage= {
+            type: OutgoingSupportedMessages.AddChat,
+            payload: {
+                chatId: chat.id,
+                roomId: payload.roomId,
+                message: payload.message,
+                name: user.name,
+                upvotes: 0
+            }
+        }
+        userManager.broadcast(payload.roomId, payload.userId, outgoingPayload);
+    }
+
+    if (message.type === SupportedMessage.UpvoteMessage) {
+        const payload = message.payload;
+        const chat = store.upvote(payload.userId, payload.roomId, payload.chatId);
+        console.log("inside upvote")
+        if (!chat) {
+            return;
+        }
+        console.log("inside upvote 2")
+
+        const outgoingPayload: OutgoingMessage= {
+            type: OutgoingSupportedMessages.UpdateChat,
+            payload: {
+                chatId: payload.chatId,
+                roomId: payload.roomId,
+                upvotes: chat.upvotes.length
+            }
+        }
+
+        console.log("inside upvote 3")
+        userManager.broadcast(payload.roomId, payload.userId, outgoingPayload);
+    }
+}
